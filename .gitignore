@@ -4,8 +4,10 @@
 preview-*.png
 *-test-result.txt
 self-test-result.txt
-save-tests-*/
+self-test-error.txt
+save-tests-*
 bin/
 obj/
 .vs/
+.vscode/
 *.tmp

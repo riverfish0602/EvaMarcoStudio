@@ -37,12 +37,9 @@ public class ActionGrid:DataGridView {
   var indexes=new HashSet<int>(selected);var moved=items.Where((item,i)=>indexes.Contains(i)).ToList();var rest=items.Where((item,i)=>!indexes.Contains(i)).ToList();int target=boundary-indexes.Count(i=>i<boundary);rest.InsertRange(target,moved);return rest;
  }
 }
-public class CountdownOverlay:Form {
+public class CountdownOverlay:OverlayForm {
  int number=3;
- public CountdownOverlay(){FormBorderStyle=FormBorderStyle.None;ShowInTaskbar=false;TopMost=true;StartPosition=FormStartPosition.Manual;Size=new Size(260,260);var screen=Screen.PrimaryScreen.Bounds;Location=new Point(screen.Left+(screen.Width-Width)/2,screen.Top+(screen.Height-Height)/2);BackColor=Color.FromArgb(20,29,45);Opacity=.94;DoubleBuffered=true;}
- protected override bool ShowWithoutActivation{get{return true;}}
- protected override CreateParams CreateParams{get{var p=base.CreateParams;p.ExStyle|=0x08000000|0x00080000|0x00000020|0x00000080;return p;}}
- protected override void WndProc(ref Message m){if(m.Msg==0x84){m.Result=new IntPtr(-1);return;}if(m.Msg==0x21){m.Result=new IntPtr(3);return;}base.WndProc(ref m);}
+ public CountdownOverlay(){Size=new Size(260,260);var screen=Screen.PrimaryScreen.Bounds;Location=new Point(screen.Left+(screen.Width-Width)/2,screen.Top+(screen.Height-Height)/2);BackColor=Color.FromArgb(20,29,45);Opacity=.94;}
  public void SetNumber(int value){number=value;Invalidate();Update();}
  protected override void OnPaint(PaintEventArgs e){base.OnPaint(e);using(var font=new Font("Segoe UI",88,FontStyle.Bold))using(var small=new Font("Microsoft JhengHei UI",12))using(var center=new StringFormat{Alignment=StringAlignment.Center,LineAlignment=StringAlignment.Center}){e.Graphics.DrawString(number.ToString(),font,Brushes.White,new RectangleF(0,12,Width,180),center);e.Graphics.DrawString("即將開始 · F10 停止",small,Brushes.LightSkyBlue,new RectangleF(0,200,Width,40),center);}}
  public static async Task Count(CancellationToken token,Action<int> display,Func<int,CancellationToken,Task> wait){for(int n=3;n>=1;n--){token.ThrowIfCancellationRequested();display(n);await wait(1000,token);}token.ThrowIfCancellationRequested();}
