@@ -1,0 +1,13 @@
+﻿*.exe
+*.pdb
+*.zip
+preview-*.png
+*-test-result.txt
+self-test-result.txt
+self-test-error.txt
+save-tests-*
+bin/
+obj/
+.vs/
+.vscode/
+*.tmp
