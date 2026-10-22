@@ -2,12 +2,9 @@
 using System.Drawing;
 using System.Windows.Forms;
 
-public class RunBadge:Form {
+public class RunBadge:OverlayForm {
  string detail="";Step next;long countdown;readonly System.Diagnostics.Stopwatch clock=new System.Diagnostics.Stopwatch();readonly Timer refresh=new Timer{Interval=100};
- public RunBadge(){FormBorderStyle=FormBorderStyle.None;ShowInTaskbar=false;TopMost=true;StartPosition=FormStartPosition.Manual;Size=new Size(440,177);refresh.Tick+=(s,e)=>Invalidate();refresh.Start();var screen=Screen.PrimaryScreen.WorkingArea;Location=new Point(screen.Right-Width-16,screen.Bottom-Height-16);BackColor=Color.FromArgb(20,29,45);Opacity=.94;DoubleBuffered=true;}
- protected override bool ShowWithoutActivation{get{return true;}}
- protected override CreateParams CreateParams{get{var p=base.CreateParams;p.ExStyle|=0x08000000|0x00080000|0x00000020|0x00000080;return p;}}
- protected override void WndProc(ref Message m){if(m.Msg==0x84){m.Result=new IntPtr(-1);return;}if(m.Msg==0x21){m.Result=new IntPtr(3);return;}base.WndProc(ref m);}
+ public RunBadge(){Size=new Size(440,177);refresh.Tick+=(s,e)=>Invalidate();refresh.Start();var screen=Screen.PrimaryScreen.WorkingArea;Location=new Point(screen.Right-Width-16,screen.Bottom-Height-16);BackColor=Color.FromArgb(20,29,45);Opacity=.94;}
  public static string Describe(string name,long remaining){return name+"｜"+(remaining<0?"持續循環":("剩餘 "+remaining+" 次"));}
  public void SetProgress(string name,long remaining){detail=Describe(name,remaining);Invalidate();}
  public static string DescribeUpcoming(Step step,long milliseconds){return step==null?"下個預計執行：無（本次即將完成）":"下個預計執行 ["+step.Type+"] (倒數 "+(Math.Ceiling(Math.Max(0,milliseconds)/100.0)/10).ToString("0.0")+" sec)";}
