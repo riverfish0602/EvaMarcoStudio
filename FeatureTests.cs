@@ -11,7 +11,7 @@ using System.Windows.Forms;
 public static class FeatureTests {
  internal static void Check(bool condition,string label){if(!condition)throw new Exception(label);}
  static SequenceItem Item(string name,int runs){return new SequenceItem{Name=name,Runs=runs,Template=new Template{Repeats=77,Gap=17,Steps=new List<Step>{new Step{Type="鍵盤按壓",Value=name,Hold=0,Delay=23}}}};}
- public static void Run(){TestColorScan();
+ public static void Run(){ExtendedTests.Run();TestColorScan();
   TestTemplateSaving();
   TestBatchAndSeconds();
   TestLiveUI();
@@ -29,7 +29,7 @@ public static class FeatureTests {
    var capture=picker.Controls.OfType<Button>().First(b=>b.Text=="捕捉按鍵");var input=picker.Controls.OfType<TextBox>().First();var down=input.GetType().GetMethod("OnKeyDown",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic);
    capture.PerformClick();down.Invoke(input,new object[]{new KeyEventArgs(Keys.A)});Check(picker.Value=="A"&&!picker.Recording,"Capture actual single-key event");capture.PerformClick();down.Invoke(input,new object[]{new KeyEventArgs(Keys.Control|Keys.S)});Check(picker.Value=="Ctrl+S"&&!picker.Recording,"Capture actual combination event");capture.PerformClick();down.Invoke(input,new object[]{new KeyEventArgs(Keys.Escape)});Check(picker.Value=="Ctrl+S"&&!picker.Recording&&!KeyPicker.AnyRecording,"Capture cancel preserves value");
   }
-  using(var main=new MainForm()){var nums=Descendants(main).OfType<NumericUpDown>();Check(nums.Count(n=>n.Maximum==1000000&&n.Value==0)==1&&nums.Count(n=>n.Maximum==86400&&n.Value==1)==2,"1000ms default delay and gap");Check(Descendants(main).OfType<CrosshairDrag>().Count()==1,"New mouse action has draggable crosshair");}
+  using(var main=new MainForm()){var nums=Descendants(main).OfType<NumericUpDown>();Check(nums.Count(n=>n.Maximum==1000000&&n.Value==0)==1&&nums.Count(n=>n.Maximum==86400&&n.Value==1)==2,"1000ms default delay and gap");Check(Descendants(main).OfType<CrosshairDrag>().Count()==3,"New mouse action has draggable crosshair");}
   using(var form=new SequenceForm(()=>true)){foreach(var item in plan.Items)form.AddItem(item);var panel=form.Controls[0];form.Controls.Remove(panel);panel.Size=form.ClientSize;panel.CreateControl();panel.PerformLayout();using(var bitmap=new Bitmap(panel.Width,panel.Height)){panel.DrawToBitmap(bitmap,new Rectangle(Point.Empty,panel.Size));bitmap.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"preview-sequence.png"));}panel.Dispose();}
   File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"feature-test-result.txt"),"PASS: exact A1000/B1000/C500 order; repeat override; action, cycle and transition intervals; cancellation within action and transition; failure abort; embedded snapshot roundtrip; positive repeat validation; single-key defaults; capture mapping; common-key replacement; 1000ms defaults; new crosshair control. Input execution mocked; no desktop input sent.");
  }

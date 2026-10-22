@@ -38,10 +38,10 @@ public class ActionGrid:DataGridView {
  }
 }
 public class CountdownOverlay:OverlayForm {
- int number=3;
- public CountdownOverlay(){Size=new Size(260,260);var screen=Screen.PrimaryScreen.Bounds;Location=new Point(screen.Left+(screen.Width-Width)/2,screen.Top+(screen.Height-Height)/2);BackColor=Color.FromArgb(20,29,45);Opacity=.94;}
+ int number=3;readonly string caption;
+ public CountdownOverlay(string text="即將開始 · F10 停止"){caption=text;Size=new Size(260,260);var screen=Screen.PrimaryScreen.Bounds;Location=new Point(screen.Left+(screen.Width-Width)/2,screen.Top+(screen.Height-Height)/2);BackColor=Color.FromArgb(20,29,45);Opacity=.94;}
  public void SetNumber(int value){number=value;Invalidate();Update();}
- protected override void OnPaint(PaintEventArgs e){base.OnPaint(e);using(var font=new Font("Segoe UI",88,FontStyle.Bold))using(var small=new Font("Microsoft JhengHei UI",12))using(var center=new StringFormat{Alignment=StringAlignment.Center,LineAlignment=StringAlignment.Center}){e.Graphics.DrawString(number.ToString(),font,Brushes.White,new RectangleF(0,12,Width,180),center);e.Graphics.DrawString("即將開始 · F10 停止",small,Brushes.LightSkyBlue,new RectangleF(0,200,Width,40),center);}}
+ protected override void OnPaint(PaintEventArgs e){base.OnPaint(e);using(var font=new Font("Segoe UI",88,FontStyle.Bold))using(var small=new Font("Microsoft JhengHei UI",12))using(var center=new StringFormat{Alignment=StringAlignment.Center,LineAlignment=StringAlignment.Center}){e.Graphics.DrawString(number.ToString(),font,Brushes.White,new RectangleF(0,12,Width,180),center);e.Graphics.DrawString(caption,small,Brushes.LightSkyBlue,new RectangleF(0,200,Width,40),center);}}
  public static async Task Count(CancellationToken token,Action<int> display,Func<int,CancellationToken,Task> wait){for(int n=3;n>=1;n--){token.ThrowIfCancellationRequested();display(n);await wait(1000,token);}token.ThrowIfCancellationRequested();}
  public static async Task Run(CancellationToken token,Action<string> report){using(var overlay=new CountdownOverlay()){overlay.Show();await Count(token,n=>{overlay.SetNumber(n);report(n+" 秒後開始，請切換至目標視窗。F10 停止");},(ms,ct)=>Task.Delay(ms,ct));}}
 }

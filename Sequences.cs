@@ -16,13 +16,13 @@ public class SequencePlan {public int OuterRuns{get;set;} public int OuterGap{ge
 }
 public static class MacroRunner {
  public static async Task RunTemplate(Template t,int runs,CancellationToken token,Action<string> report,Func<Step,CancellationToken,Task> perform=null,Func<int,CancellationToken,Task> wait=null,Action<long> remaining=null,Action<Step,long> upcoming=null,Step following=null,int transitionDelay=0){
-  MainForm.Validate(t);if(runs<0||runs>1000000||t.Steps.Count==0)throw new Exception("循環設定無效或範本沒有動作。");perform=perform??Perform;wait=wait??((ms,ct)=>Task.Delay(ms,ct));
+  MainForm.Validate(t);if(runs<0||runs>1000000||t.Steps.Count==0)throw new Exception("循環設定無效或範本沒有動作。");using(var playback=new InputPlayback()){perform=perform??playback.Perform;wait=wait??((ms,ct)=>Task.Delay(ms,ct));
   for(long cycle=1;runs==0||cycle<=runs;cycle++){if(remaining!=null)remaining(runs==0?-1:runs-cycle+1);
    for(int index=0;index<t.Steps.Count;index++){token.ThrowIfCancellationRequested();report("循環 "+cycle+(runs==0?"":" / "+runs)+" · 動作 "+(index+1)+" / "+t.Steps.Count);var current=t.Steps[index];bool repeat=runs==0||cycle<runs;var next=index+1<t.Steps.Count?t.Steps[index+1]:(repeat?t.Steps[0]:following);long extra=index+1<t.Steps.Count?0:(repeat?t.Gap+1L:transitionDelay+1L);if(upcoming!=null)upcoming(next,(current.Type=="等待"?0:current.Hold)+current.Delay+extra);await perform(current,token);if(upcoming!=null)upcoming(next,current.Delay+extra);await wait(current.Delay,token);}
    if(remaining!=null)remaining(runs==0?-1:runs-cycle);if(runs==0||cycle<runs)await wait(t.Gap,token);await wait(1,token);
   }
  }
- public static async Task RunSequence(SequencePlan plan,CancellationToken token,Action<string> report,Func<Step,CancellationToken,Task> perform=null,Func<int,CancellationToken,Task> wait=null,Action<string,long> progress=null,Action<Step,long> upcoming=null){
+ } public static async Task RunSequence(SequencePlan plan,CancellationToken token,Action<string> report,Func<Step,CancellationToken,Task> perform=null,Func<int,CancellationToken,Task> wait=null,Action<string,long> progress=null,Action<Step,long> upcoming=null){
   SequencePlan.Validate(plan);if(plan.Items.Count==0)throw new Exception("請加入範本。");wait=wait??((ms,ct)=>Task.Delay(ms,ct));
   for(long cycle=1;plan.OuterRuns==0||cycle<=plan.OuterRuns;cycle++){
    bool another=plan.OuterRuns==0||cycle<plan.OuterRuns;
@@ -37,15 +37,7 @@ public static class MacroRunner {
    if(another){token.ThrowIfCancellationRequested();if(upcoming!=null)upcoming(plan.Items[0].Template.Steps[0],plan.OuterGap);await wait(plan.OuterGap,token);}
   }
  }
- static async Task Perform(Step s,CancellationToken token){
-  if(s.Type=="滑鼠點擊"){
-   if(!Screen.AllScreens.Any(sc=>sc.Bounds.Contains(s.X,s.Y)))throw new Exception("滑鼠座標不在目前螢幕範圍內。");Native.Move(s.X,s.Y);bool down=false;
-   try{Native.Mouse(s.Value,false);down=true;await Task.Delay(s.Hold,token);}finally{if(down)Native.Mouse(s.Value,true);}
-  }else if(s.Type=="鍵盤按壓"){
-   var pressed=new List<ushort>();try{foreach(var k in MainForm.ParseKeys(s.Value)){Native.Key(k,false);pressed.Add(k);}await Task.Delay(s.Hold,token);}
-   finally{Exception error=null;pressed.Reverse();foreach(var k in pressed){try{Native.Key(k,true);}catch(Exception ex){error=ex;}}if(error!=null)throw error;}
-  }
- }
+
 }
 public class SequenceForm:Form {
  readonly ActionGrid grid=new ActionGrid{Dock=DockStyle.Fill,ReadOnly=false,EditMode=DataGridViewEditMode.EditProgrammatically,AllowUserToAddRows=false,AllowUserToDeleteRows=false,MultiSelect=true,SelectionMode=DataGridViewSelectionMode.FullRowSelect,AutoSizeColumnsMode=DataGridViewAutoSizeColumnsMode.Fill,RowHeadersVisible=true,RowHeadersWidth=32,BackgroundColor=Color.White};

@@ -48,7 +48,7 @@ public class StepEditor:Form {
   source=step;Text="修改動作 #"+step.Sequence+" · "+step.Type;Size=new Size(730,540);FormBorderStyle=FormBorderStyle.FixedDialog;MaximizeBox=false;MinimizeBox=false;StartPosition=FormStartPosition.CenterParent;Font=new Font("Microsoft JhengHei UI",10);KeyPreview=true;
   var layout=new FlowLayoutPanel{Dock=DockStyle.Fill,FlowDirection=FlowDirection.TopDown,WrapContents=false,Padding=new Padding(18),AutoScroll=true};Controls.Add(layout);
   layout.Controls.Add(new Label{Text="修改後按「儲存修改」套用；取消會保留原動作。",AutoSize=true,Margin=new Padding(3,3,3,15)});
-  x.Value=step.X;y.Value=step.Y;hold.Value=step.Hold;delay.Value=step.Delay/1000m;
+  if(RecordedGesture.Has(step))layout.Controls.Add(new Label{AutoSize=true,ForeColor=Color.DarkOrange,Text="此動作包含錄製細節；修改座標或按鍵會以新設定重新建立動作。"});x.Value=step.X;y.Value=step.Y;hold.Value=step.Hold;delay.Value=step.Delay/1000m;
   if(step.Type=="滑鼠點擊"){
    mouse.Items.AddRange(new object[]{"左鍵","右鍵","中鍵"});mouse.SelectedItem=step.Value;
    var coordinates=Row();Field(coordinates,"X",x);Field(coordinates,"Y",y);Field(coordinates,"滑鼠按鈕",mouse);layout.Controls.Add(coordinates);
@@ -71,7 +71,7 @@ public class StepEditor:Form {
  static FlowLayoutPanel Row(){return new FlowLayoutPanel{Width=660,Height=45,WrapContents=false};}
  static void Field(FlowLayoutPanel row,string label,Control control){row.Controls.Add(new Label{Text=label,AutoSize=true,Margin=new Padding(3,8,5,0)});row.Controls.Add(control);}
  public void SetPosition(Point p){x.Value=Math.Max(x.Minimum,Math.Min(x.Maximum,p.X));y.Value=Math.Max(y.Minimum,Math.Min(y.Maximum,p.Y));}
- public Step BuildResult(){return new Step{Sequence=source.Sequence,Type=source.Type,X=source.Type=="滑鼠點擊"?(int)x.Value:0,Y=source.Type=="滑鼠點擊"?(int)y.Value:0,Value=source.Type=="滑鼠點擊"?mouse.Text:source.Type=="鍵盤按壓"?key.Value:"",Hold=source.Type=="等待"?0:(int)hold.Value,Delay=WaitUnits.ToMilliseconds(delay.Value),Notes=notes.Text};}
+ public Step BuildResult(){var result=new Step{Sequence=source.Sequence,Type=source.Type,X=source.Type=="滑鼠點擊"?(int)x.Value:0,Y=source.Type=="滑鼠點擊"?(int)y.Value:0,Value=source.Type=="滑鼠點擊"?mouse.Text:source.Type=="鍵盤按壓"?key.Value:"",Hold=source.Type=="等待"?0:(int)hold.Value,Delay=WaitUnits.ToMilliseconds(delay.Value),Notes=notes.Text};RecordedGesture.Preserve(source,result);return result;}
  protected override bool ProcessCmdKey(ref Message msg,Keys keyData){if(keyData==Keys.Escape&&dragging){EndDrag(true);return true;}return base.ProcessCmdKey(ref msg,keyData);}
  void EndDrag(bool revert){if(!dragging)return;dragging=false;drag.Capture=false;Opacity=originalOpacity;if(Owner!=null)Owner.Opacity=ownerOpacity;if(revert)SetPosition(before);Preview();}
  void Preview(){location.Text="目標座標：X = "+x.Value+"，Y = "+y.Value;if(!ready||source.Type!="滑鼠點擊")return;if(overlays.Count==0)foreach(var screen in Screen.AllScreens)overlays.Add(new MarkerOverlay(screen.Bounds));foreach(var overlay in overlays){overlay.Markers=new List<PointMarker>{new PointMarker{Position=new Point((int)x.Value,(int)y.Value),Label=source.Sequence+" · 修改預覽",Preview=true}};if(!overlay.Visible)overlay.Show();overlay.Invalidate();}}
