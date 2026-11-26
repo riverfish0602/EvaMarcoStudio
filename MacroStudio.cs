@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
@@ -13,7 +13,7 @@ using System.Windows.Forms;
 [assembly: System.Reflection.AssemblyProduct("FishMarco")]
 [assembly: System.Reflection.AssemblyDescription("生活俠的小幫手")]
 
-public class Step { public int EndX {get;set;} public int EndY {get;set;} public int WheelDelta {get;set;} public List<RecordedInput> RecordedInputs {get;set;} public Step(){WheelDelta=120;}
+public class Step { public RecordedScreen[] Screens {get;set;} public int EndX {get;set;} public int EndY {get;set;} public int WheelDelta {get;set;} public List<RecordedInput> RecordedInputs {get;set;} public Step(){WheelDelta=120;}
  public string Notes {get;set;} public int Sequence {get;set;} public string Type {get;set;} public int X {get;set;} public int Y {get;set;}
  public string Value {get;set;} public int Hold {get;set;} public int Delay {get;set;}
 }
@@ -22,7 +22,12 @@ public class Template {
  public Template(){Version=1;Repeats=0;Gap=1000;Steps=new List<Step>();}
 }
 static class Native {
- [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+ [DllImport("user32.dll")] static extern bool SetProcessDPIAware();
+ [DllImport("user32.dll")] static extern bool SetProcessDpiAwarenessContext(IntPtr context);
+ public static void EnableMonitorDpi(){
+  try{if(SetProcessDpiAwarenessContext(new IntPtr(-4)))return;}catch(EntryPointNotFoundException){}
+  SetProcessDPIAware();
+ }
  [DllImport("user32.dll")] public static extern bool RegisterHotKey(IntPtr h,int id,uint mod,uint key);
  [DllImport("user32.dll")] public static extern bool UnregisterHotKey(IntPtr h,int id);
  [DllImport("user32.dll",SetLastError=true)] static extern uint SendInput(uint n,INPUT[] inputs,int size);
@@ -37,12 +42,47 @@ static class Native {
  public static void Wheel(int delta){Send(new INPUT{type=0,u=new UNION{mouse=new MOUSE{flags=0x0800,data=unchecked((uint)delta)}}});} public static void Move(int x,int y){if(!Screen.AllScreens.Any(sc=>sc.Bounds.Contains(x,y)))throw new Exception("滑鼠座標不在目前螢幕範圍內。");if(!SetCursorPos(x,y))throw new Exception("無法移動滑鼠。");}
 }
 public class PointMarker {
- public Point Position; public string Label; public bool Preview;
+ public readonly List<Point> Destinations=new List<Point>(); public Point Position; public string Label; public bool Preview;
 }
 // 視窗樣式、不搶焦點、滑鼠穿透都由 OverlayForm 處理，這裡只留下自己的差異：
 // 覆蓋指定螢幕、用 Magenta 當透明色、畫出座標標示。
+public sealed class DragArrowOverlay:OverlayForm {
+ public List<PointMarker> Markers=new List<PointMarker>();
+ public DragArrowOverlay(Rectangle bounds){Bounds=bounds;BackColor=Color.Magenta;TransparencyKey=BackColor;}
+ protected override void OnPaint(PaintEventArgs e){
+  base.OnPaint(e);
+  using(var pen=new Pen(Color.FromArgb(0,102,204),1f)){
+   foreach(var marker in Markers)foreach(var end in marker.Destinations){
+    float dx=end.X-marker.Position.X,dy=end.Y-marker.Position.Y;
+    float length=(float)Math.Sqrt(dx*dx+dy*dy);
+    if(length==0)continue;
+    float ux=dx/length,uy=dy/length;
+    // Keep the open arrowhead outside the destination crosshair.
+    float inset=Math.Min(18f,length/3),head=Math.Min(16f,length/3);
+    float halfWidth=head*.625f;
+    float tipX=end.X-Left-inset*ux,tipY=end.Y-Top-inset*uy;
+    float baseX=tipX-head*ux,baseY=tipY-head*uy;
+    e.Graphics.DrawLine(pen,marker.Position.X-Left,marker.Position.Y-Top,tipX,tipY);
+    e.Graphics.DrawLines(pen,new[]{new PointF(baseX-uy*halfWidth,baseY+ux*halfWidth),
+     new PointF(tipX,tipY),new PointF(baseX+uy*halfWidth,baseY-ux*halfWidth)});
+   }
+  }
+ }
+}
 public class MarkerOverlay:OverlayForm {
  public List<PointMarker> Markers=new List<PointMarker>();
+ DragArrowOverlay arrows;
+ public void UpdateArrows(bool needed,double opacity){
+  if(!needed){if(arrows!=null)arrows.Hide();return;}
+  if(arrows==null){arrows=new DragArrowOverlay(Bounds);Owner=arrows;}
+  arrows.Markers=Markers;arrows.Opacity=opacity;
+  if(!arrows.Visible)arrows.Show();
+  arrows.Invalidate();
+ }
+ protected override void Dispose(bool disposing){
+  if(disposing&&arrows!=null){Owner=null;arrows.Dispose();arrows=null;}
+  base.Dispose(disposing);
+ }
  public MarkerOverlay(Rectangle bounds){Bounds=bounds;BackColor=Color.Magenta;TransparencyKey=Color.Magenta;}
  protected override void OnPaint(PaintEventArgs e){base.OnPaint(e);PaintMarkers(e.Graphics,ClientRectangle,Location,Markers);}
  public static void PaintMarkers(Graphics g,Rectangle canvas,Point origin,IEnumerable<PointMarker> markers){
@@ -69,6 +109,7 @@ public partial class MainForm:Form {
  readonly FlowLayoutPanel mouseFields=new FlowLayoutPanel(),keyFields=new FlowLayoutPanel();
  readonly Button showMarkers=new Button{Text="關閉螢幕點位",AutoSize=true,AutoSizeMode=AutoSizeMode.GrowAndShrink,FlatStyle=FlatStyle.Flat,Padding=new Padding(8,5,8,5),Margin=new Padding(8,2,0,4),BackColor=Color.White,UseVisualStyleBackColor=false};bool markersVisible=true;bool syncingEditor;
  readonly List<MarkerOverlay> overlays=new List<MarkerOverlay>();
+ int arrowTransparency=40;
  readonly TextBox notes=new TextBox{Width=750,Height=38,Multiline=true,ScrollBars=ScrollBars.Vertical,MaxLength=int.MaxValue};bool rebuilding;string actionState="[]";Stack<string> undoActions=new Stack<string>();List<Step> copiedActions=new List<Step>();string templateName="未命名範本";string currentTemplatePath;string savedSnapshot; Control holdLabel; bool draftVisible; CrosshairDrag newDrag; SequenceForm sequenceWindow; ScanStudioForm scanWindow; SequencePlan savedSequence=new SequencePlan();
  static NumericUpDown Num(int min,int max,int value){return new NumericUpDown{Minimum=min,Maximum=max,Value=value,Width=100};}
  static bool selfTesting;SequenceItem editingSequenceItem;string sessionLoadError;
@@ -80,6 +121,15 @@ public partial class MainForm:Form {
  var toolbar=Row();layout.Controls.Add(Section(Color.FromArgb(170,170,170),toolbar),0,0);AddButton(toolbar,"新增範本",()=>{if(ConfirmReplace()){editingSequenceItem=null;grid.Rows.Clear();draftVisible=false;RefreshMarkers();repeat.Value=0;gap.Value=1;delay.Value=1;keys.Value="Space";notes.Text="";templateName="未命名範本";Text="生活俠的小幫手｜未命名";MarkSaved(null);}});AddButton(toolbar,"載入範本",LoadTemplate);AddButton(toolbar,"另存範本",SaveTemplate);AddButton(toolbar,"範本組合…",OpenSequence);AddButton(toolbar,"顏色掃描小工具",OpenScanStudio);SetupRecording(toolbar);
 
  showMarkers.Font=Font;showMarkers.FlatAppearance.BorderColor=Color.Silver;showMarkers.Click+=(s,e)=>{markersVisible=!markersVisible;showMarkers.Text=markersVisible?"關閉螢幕點位":"顯示螢幕點位";showMarkers.BackColor=markersVisible?Color.White:Color.FromArgb(235,235,235);RefreshMarkers();};
+ var arrowMenu=new ContextMenuStrip();
+ foreach(int percent in new[]{0,20,40,60,80}){
+  var choiceItem=new ToolStripMenuItem("箭頭透明度 "+percent+"%"){Checked=percent==arrowTransparency};
+  choiceItem.Click+=(s,e)=>{arrowTransparency=percent;foreach(ToolStripMenuItem item in arrowMenu.Items)item.Checked=item==choiceItem;RefreshMarkers();};
+  arrowMenu.Items.Add(choiceItem);
+ }
+ showMarkers.ContextMenuStrip=arrowMenu;
+ var markerTip=new ToolTip();markerTip.SetToolTip(showMarkers,"按右鍵調整拖曳箭頭透明度");
+ Disposed+=(s,e)=>{arrowMenu.Dispose();markerTip.Dispose();};
  var editor=new BufferedEditorPanel{Dock=DockStyle.Top,AutoSize=true,AutoSizeMode=AutoSizeMode.GrowAndShrink,RowCount=4,ColumnCount=1,BackColor=Color.Transparent,Padding=new Padding(4)};editor.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
  for(int i=0;i<4;i++)editor.RowStyles.Add(new RowStyle(SizeType.AutoSize));layout.Controls.Add(Section(Color.FromArgb(238,238,238),editor),0,1);
  type.Width=200;type.MinimumSize=new Size(200,0);type.DropDownWidth=200;button.Width=160;type.DropDownStyle=button.DropDownStyle=ComboBoxStyle.DropDownList;type.Items.AddRange(ActionKinds.All);type.SelectedIndex=0;button.Items.AddRange(new object[]{"左鍵","右鍵","中鍵"});button.SelectedIndex=0;
@@ -115,7 +165,7 @@ public partial class MainForm:Form {
   if(!(confirm??ConfirmLeave)())return false;
   ApplyTemplate(template);editingSequenceItem=item;templateName=item.Name;Text="生活俠的小幫手｜"+item.Name;
   string path=SequenceForm.MissingSource(item)?null:item.SourcePath;MarkSaved(path);
-  if(path!=null){try{var source=Json.Read<Template>(File.ReadAllText(path));Validate(source);savedSnapshot=Json.Write(source);}catch{savedSnapshot=null;}}
+  // MarkSaved uses the embedded template as opened, including its displayed row numbers.
   status.Text=path==null?"已開啟組合內的範本；儲存時請選擇檔案位置。":"已開啟範本："+path;return true;
  }
  void SetupCellEditing(){
@@ -151,7 +201,7 @@ public partial class MainForm:Form {
   var rows=grid.SelectedRows.Cast<DataGridViewRow>().OrderBy(r=>r.Index).ToArray();if(rows.Length==0){status.Text="請先選取要修改的動作。";return;}
   if(grid.IsCurrentCellInEditMode&&!grid.EndEdit())return;
   var value=EditorStep();ValidateStep(value);
-  rebuilding=true;try{foreach(var row in rows)SetRow(row,CopyStep(value));}finally{rebuilding=false;}
+  rebuilding=true;try{foreach(var row in rows){var edited=CopyStep(value);if(rows.Length==1)RecordedGesture.Preserve((Step)row.Tag,edited);SetRow(row,edited);}}finally{rebuilding=false;}
   Renumber();draftVisible=false;RefreshMarkers();status.Text="已套用至 "+rows.Length+" 個動作";
  }
  void EditBatch(){
@@ -187,9 +237,40 @@ public partial class MainForm:Form {
  void MoveRow(int offset){var indexes=grid.SelectedRows.Cast<DataGridViewRow>().Select(r=>r.Index).OrderBy(i=>i).ToArray();if(indexes.Length==0)return;int target=offset<0?indexes[0]-1:indexes.Last()+2;if(target<0||target>grid.Rows.Count)return;ReorderActions(indexes,target);} Template Current(){if(grid.IsCurrentCellInEditMode&&!grid.EndEdit())throw new Exception("請先修正正在編輯的儲存格，或按 Esc 取消。");Renumber();return new Template{Repeats=(int)repeat.Value,Gap=WaitUnits.ToMilliseconds(gap.Value),Steps=grid.Rows.Cast<DataGridViewRow>().Select(r=>(Step)r.Tag).ToList()};}
  static void SuspendEditor(Control c){c.SuspendLayout();foreach(Control child in c.Controls)SuspendEditor(child);}
  static void ResumeEditor(Control c){foreach(Control child in c.Controls)ResumeEditor(child);c.ResumeLayout(true);}
- void UpdateFields(){var editor=mouseFields.Parent.Parent;if(!syncingEditor)SuspendEditor(editor);try{var style=((TableLayoutPanel)editor).RowStyles[1];style.SizeType=ActionKinds.Extended(type.Text)?SizeType.AutoSize:SizeType.Absolute;style.Height=58;extendedFields.Visible=ActionKinds.Extended(type.Text);mouseFields.Visible=type.Text=="滑鼠點擊";keyFields.Visible=type.Text=="鍵盤按壓";mouseFields.Parent.Visible=true;delay.Parent.Visible=!ActionKinds.Extended(type.Text);hold.Parent.Visible=type.Text=="滑鼠點擊"||type.Text=="鍵盤按壓";hold.Visible=holdLabel.Visible=type.Text=="滑鼠點擊"||type.Text=="鍵盤按壓";}finally{if(!syncingEditor)ResumeEditor(editor);}}
+ void UpdateFields(){
+  var editor=(TableLayoutPanel)mouseFields.Parent.Parent;
+  if(!syncingEditor)SuspendEditor(editor);
+  try{
+   // Reserve room for both drag coordinates even when a shorter editor is selected.
+   editor.RowStyles[1].SizeType=SizeType.Absolute;
+   editor.RowStyles[1].Height=2*(newDrag.GetPreferredSize(Size.Empty).Height+8)+Font.Height+24;
+   editor.RowStyles[2].SizeType=SizeType.Absolute;
+   editor.RowStyles[2].Height=Math.Max(56,Font.Height+36);
+   bool mouse=type.Text=="滑鼠點擊",keyboard=type.Text=="鍵盤按壓",extended=ActionKinds.Extended(type.Text);
+   extendedFields.Visible=extended;mouseFields.Visible=mouse;keyFields.Visible=keyboard;
+   delay.Parent.Visible=!extended;hold.Parent.Visible=hold.Visible=holdLabel.Visible=mouse||keyboard;
+  }finally{if(!syncingEditor)ResumeEditor(editor);}
+ }
  void Renumber(){foreach(DataGridViewRow row in grid.Rows){var step=row.Tag as Step;if(step!=null){step.Sequence=row.Index+1;row.Cells[0].Value=step.Sequence;}}TrackActions();RefreshMarkers();}
- public static List<PointMarker> BuildMarkers(IEnumerable<Step> steps){return steps.Where(a=>a!=null&&a.Type=="滑鼠點擊").GroupBy(a=>new Point(a.X,a.Y)).Select(g=>new PointMarker{Position=g.Key,Label=string.Join(", ",g.Select(a=>a.Sequence.ToString()))}).ToList();}
+ public static List<PointMarker> BuildMarkers(IEnumerable<Step> steps){
+  var markers=new Dictionary<Point,PointMarker>();
+  var screens=RecordedScreen.Current();
+  foreach(var s in steps){
+   if(s==null||!ActionKinds.Position(s.Type))continue;
+   var start=RecordedScreen.Resolve(s.Screens,s.X,s.Y,screens);
+   var marker=AddMarker(markers,start,s.Sequence);
+   if(s.Type!="滑鼠拖曳")continue;
+   var end=RecordedScreen.Resolve(s.Screens,s.EndX,s.EndY,screens);
+   if(end!=start){marker.Destinations.Add(end);AddMarker(markers,end,s.Sequence);}
+  }
+  return markers.Values.ToList();
+ }
+ static PointMarker AddMarker(Dictionary<Point,PointMarker> markers,Point point,int number){
+  PointMarker marker;
+  if(markers.TryGetValue(point,out marker))marker.Label+=", "+number;
+  else markers.Add(point,marker=new PointMarker{Position=point,Label=number.ToString()});
+  return marker;
+ }
  void ClearMarkers(){foreach(var o in overlays)o.Dispose();overlays.Clear();}
  void RefreshMarkers(){
   if(!screenReady||rebuilding||syncingEditor)return;
@@ -202,7 +283,8 @@ public partial class MainForm:Form {
   if(markers.Count==0){ClearMarkers();return;}
   var screens=Screen.AllScreens;
   if(overlays.Count!=screens.Length||overlays.Where((o,i)=>o.Bounds!=screens[i].Bounds).Any()){ClearMarkers();foreach(var screen in screens)overlays.Add(new MarkerOverlay(screen.Bounds));}
-  foreach(var overlay in overlays){overlay.Markers=markers;if(!overlay.Visible)overlay.Show();overlay.Invalidate();}
+  bool hasArrows=markers.Any(marker=>marker.Destinations.Count>0);
+  foreach(var overlay in overlays){overlay.Markers=markers;overlay.UpdateArrows(hasArrows,1-arrowTransparency/100d);if(!overlay.Visible)overlay.Show();overlay.Invalidate();}
  }
  string Snapshot(){return Json.Write(Current());}
  void MarkSaved(string path){currentTemplatePath=path;savedSnapshot=Snapshot();}
@@ -244,8 +326,8 @@ public partial class MainForm:Form {
  public static ushort[] ParseKeys(string text){var result=new List<ushort>();foreach(var part in (text??"").Split('+')){string p=part.Trim();Keys k;switch(p.ToUpperInvariant()){case "CTRL":case "CONTROL":k=Keys.ControlKey;break;case "ALT":k=Keys.Menu;break;case "SHIFT":k=Keys.ShiftKey;break;case "WIN":k=Keys.LWin;break;default:if(p.Length==1&&char.IsDigit(p[0]))k=(Keys)(48+p[0]-'0');else if(!Enum.TryParse<Keys>(p,true,out k))throw new Exception("不支援的按鍵："+p);break;}int v=(int)k;if(v<8||v>254||k==Keys.F5||k==Keys.F6||k==Keys.F9||k==Keys.F10)throw new Exception("按鍵無效或為保留熱鍵："+p);if(result.Contains((ushort)v))throw new Exception("組合鍵不可重複。");result.Add((ushort)v);}return result.ToArray();}
  public static void ValidateStep(Step s){if(s==null||!ActionKinds.All.Contains(s.Type))throw new Exception("範本包含無效動作。");if(s.Hold<0||s.Hold>600000||s.Delay<0||s.Delay>86400000||Math.Abs((long)s.X)>100000||Math.Abs((long)s.Y)>100000)throw new Exception("時間或座標超出允許範圍。");ActionKinds.Validate(s);if(s.Type=="鍵盤按壓")ParseKeys(s.Value);if(s.Type=="滑鼠點擊"&&!(new[]{"左鍵","右鍵","中鍵"}).Contains(s.Value))throw new Exception("滑鼠按鈕無效。");}
  public static void Validate(Template t){if(t==null||t.Version!=1||t.Steps==null||t.Steps.Count>10000||t.Repeats<0||t.Repeats>1000000||t.Gap<0||t.Gap>86400000)throw new Exception("範本格式或循環設定無效。");foreach(var s in t.Steps)ValidateStep(s);}
- async Task Run(){if(cancel!=null||capturing||editingDialog||KeyPicker.AnyRecording||(newDrag.Dragging||extendedFields.Dragging))return;try{if(!hotkeysReady)throw new Exception("F10 停止熱鍵不可用，請關閉占用熱鍵的程式後重新啟動。");var t=Current();Validate(t);if(t.Steps.Count==0)throw new Exception("請先加入動作。");cancel=new CancellationTokenSource();var token=cancel.Token;SetEditing(false);await CountdownOverlay.Run(token,s=>status.Text=s);using(var badge=new RunBadge()){badge.SetProgress(templateName,t.Repeats==0?-1:t.Repeats);badge.Show();await MacroRunner.RunTemplate(t,t.Repeats,token,s=>status.Text=s+"｜F10 停止",remaining:n=>badge.SetProgress(templateName,n),upcoming:badge.SetUpcoming);}status.Text="執行完成";}catch(OperationCanceledException){status.Text="已停止，按鍵已釋放";}catch(Exception ex){status.Text="執行中止："+ex.Message;MessageBox.Show(this,ex.Message,"執行中止");}finally{if(cancel!=null){cancel.Dispose();cancel=null;}SetEditing(true);}}
- [STAThread] public static void Main(string[] args){if(args.Contains("--self-test")){selfTesting=true;try{SelfTest();}catch(Exception ex){Report(ex);Environment.ExitCode=1;}return;}Native.SetProcessDPIAware();Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);Application.Run(new MainForm());}
+ async Task Run(){if(cancel!=null||capturing||editingDialog||KeyPicker.AnyRecording||(newDrag.Dragging||extendedFields.Dragging))return;var previousState=WindowState;try{if(!hotkeysReady)throw new Exception("F10 停止熱鍵不可用，請關閉占用熱鍵的程式後重新啟動。");var t=Current();Validate(t);if(t.Steps.Count==0)throw new Exception("請先加入動作。");cancel=new CancellationTokenSource();var token=cancel.Token;SetEditing(false);WindowState=FormWindowState.Minimized;await CountdownOverlay.Run(token,s=>status.Text=s);using(var badge=new RunBadge()){badge.SetProgress(templateName,t.Repeats==0?-1:t.Repeats);badge.Show();await MacroRunner.RunTemplate(t,t.Repeats,token,s=>status.Text=s+"｜F10 停止",remaining:n=>badge.SetProgress(templateName,n),upcoming:badge.SetUpcoming);}status.Text="執行完成";}catch(OperationCanceledException){status.Text="已停止，按鍵已釋放";}catch(Exception ex){status.Text="執行中止："+ex.Message;MessageBox.Show(this,ex.Message,"執行中止");}finally{if(cancel!=null){cancel.Dispose();cancel=null;WindowState=previousState;}SetEditing(true);}}
+ [STAThread] public static void Main(string[] args){if(args.Contains("--self-test")){selfTesting=true;try{SelfTest();}catch(Exception ex){Report(ex);Environment.ExitCode=1;}return;}Native.EnableMonitorDpi();Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);Application.Run(new MainForm());}
  static void Check(bool condition,string message){if(!condition)throw new Exception(message);}
  // 這是 winexe，沒有主控台，Console.WriteLine 會被吞掉，自我測試失敗時看不到原因。
  // 所以把例外同時寫到執行檔旁邊的檔案，並盡量也送到呼叫端的主控台（從 PowerShell 啟動時有機會看到）。
@@ -306,7 +388,7 @@ public partial class MainForm:Form {
    Check(f.Current().Steps.All(a=>a.Delay==1500&&a.Notes=="batch")&&!object.ReferenceEquals(f.Current().Steps[0],f.Current().Steps[1]),"Top apply updates all selected independent actions");
    f.UndoAction();Check(f.Current().Steps[0].Notes=="A"&&f.Current().Steps[1].Delay==200,"Top batch apply undone in one operation");
    var panel=f.Controls[0];f.Controls.Remove(panel);panel.Size=f.ClientSize;panel.CreateControl();int top=-1;
-   foreach(string kind in new[]{"滑鼠點擊","鍵盤按壓","等待"}){f.type.SelectedItem=kind;panel.PerformLayout();if(top<0)top=f.grid.Top;Check(f.grid.Top==top,"Stable action editor height");}
+   foreach(string kind in ActionKinds.All){f.type.SelectedItem=kind;panel.PerformLayout();if(top<0)top=f.grid.Top;Check(f.grid.Top==top,"Stable action editor height");}
    Check(f.showMarkers.Text=="關閉螢幕點位","Marker button action text");f.showMarkers.PerformClick();Check(!f.markersVisible&&f.showMarkers.Text=="顯示螢幕點位","Marker toggle");
    panel.Dispose();
   }
@@ -330,10 +412,18 @@ public partial class MainForm:Form {
     f.AddStep(new Step{Type="等待",Delay=999});bool checkedBeforeSwitch=false;
     Check(!f.EditSequenceTemplate(item,()=>{checkedBeforeSwitch=true;return false;})&&checkedBeforeSwitch&&f.Current().Steps[0].Delay==999,"Cancel template switch preserves current actions");
     Check(f.EditSequenceTemplate(item,()=>true)&&f.Current().Steps[0].Delay==100&&!object.ReferenceEquals(f.Current().Steps[0],item.Template.Steps[0]),"Template switch loads independent embedded actions");
+    Check(!f.HasUnsavedChanges(),"Opening an embedded template with legacy sequence numbers stays clean");
+    string originalFile=File.ReadAllText(source);
+    f.repeat.Value=2;
+    MacroRunner.RunTemplate(f.Current(),2,CancellationToken.None,s=>{},(s,ct)=>Task.FromResult(0),(ms,ct)=>Task.FromResult(0)).GetAwaiter().GetResult();
+    Check(!f.HasUnsavedChanges()&&File.ReadAllText(source)==originalFile,"Playback keeps the template and file unchanged");
     f.SetRow(f.grid.Rows[0],new Step{Type="等待",Delay=333});f.SaveToPath(source);
     Check(item.Template.Steps[0].Delay==333&&Json.Read<Template>(File.ReadAllText(source)).Steps[0].Delay==333,"Saving edited sequence template updates source and combination");
+    string second=Path.Combine(folder,"second.json");f.SaveToPath(second);
+    f.SetRow(f.grid.Rows[0],new Step{Type="等待",Delay=444});f.SaveCurrentTemplate();
+    Check(Json.Read<Template>(File.ReadAllText(second)).Steps[0].Delay==444&&Json.Read<Template>(File.ReadAllText(source)).Steps[0].Delay==333,"After Save As, Save updates only the new path");
    }
-   using(var sequence=new SequenceForm(()=>true)){var missing=new SequenceItem{Name="遺失範本",SourcePath=Path.Combine(folder,"missing.json"),Runs=1,Template=item.Template};sequence.AddItem(missing);var actionGrid=(ActionGrid)typeof(SequenceForm).GetField("grid",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic).GetValue(sequence);Check(actionGrid.RowHeadersVisible&&actionGrid.Rows[0].ErrorText.Contains("找不到"),"Missing source row warning");}
+   using(var sequence=new SequenceForm(()=>true)){var missing=new SequenceItem{Name="遺失範本",SourcePath=Path.Combine(folder,"missing.json"),Runs=1,Template=item.Template};sequence.AddItem(missing);sequence.MarkPlanSaved();Check(!sequence.PlanChanged(),"Restored sequence stays clean");sequence.SetOuterLoop(2,100);Check(sequence.PlanChanged(),"Edited sequence prompts before replacement");var actionGrid=(ActionGrid)typeof(SequenceForm).GetField("grid",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic).GetValue(sequence);Check(actionGrid.RowHeadersVisible&&actionGrid.Rows[0].ErrorText.Contains("找不到"),"Missing source row warning");}
   }
   legacy.Gap=-1;bool bad=false;try{Validate(legacy);}catch{bad=true;}Check(bad,"Invalid timing accepted");
   using(var bitmap=new Bitmap(760,320))using(var g=Graphics.FromImage(bitmap)){

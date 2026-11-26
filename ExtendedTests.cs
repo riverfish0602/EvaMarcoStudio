@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
@@ -13,6 +13,22 @@ public static class ExtendedTests {
   Check(ActionKinds.All.SequenceEqual(new[]{"滑鼠點擊","滑鼠滾輪","滑鼠拖曳","鍵盤按壓","等待"}),"only five complete action types");
   foreach(var removed in new[]{"滑鼠移動","滑鼠按下","滑鼠放開","鍵盤按下","鍵盤放開"}){bool rejected=false;try{MainForm.ValidateStep(new Step{Type=removed});}catch{rejected=true;}Check(rejected,"removed action rejected: "+removed);}
   var drag=new Step{Type="滑鼠拖曳",Value="左鍵",X=-25,Y=40,EndX=200,EndY=300,Hold=45,Delay=10};
+  drag.Sequence=4;
+  var markers=MainForm.BuildMarkers(new[]{drag});
+  Check(markers.Count==2&&markers.All(m=>m.Label=="4")&&markers[0].Destinations.Single()==markers[1].Position,"both drag endpoints have the row number and direction");
+  var primary=new RecordedScreen{Device="primary",Width=1920,Height=1080};
+  var external=new RecordedScreen{Device="external",Left=-2560,Top=-100,Width=2560,Height=1440};
+  var changedLayout=new[]{primary,new RecordedScreen{Device="external",Left=1920,Width=1280,Height=720}};
+  var dual=new RecordingBuffer(new[]{primary,external});
+  dual.Wheel(120,new Point(-1,1339),0);
+  dual.Mouse("左鍵",false,new Point(-2560,-100),10);
+  dual.Move(new Point(-1280,620),30);
+  dual.Mouse("左鍵",true,new Point(100,200),40);
+  var dualRows=Json.Copy(dual.Finish(50));
+  Check(dualRows[0].Screens.Single().Width==2560&&dualRows[1].Screens.Length==2,"record the screens used by each action");
+  Check(RecordedScreen.Resolve(dualRows[0].Screens,-1,1339,changedLayout)==new Point(3199,719),"map external monitor bottom right");
+  var path=dualRows[1].RecordedInputs.Select(e=>RecordedScreen.Resolve(dualRows[1].Screens,e.X,e.Y,changedLayout)).ToArray();
+  Check(path.SequenceEqual(new[]{new Point(1920,0),new Point(2560,360),new Point(100,200)}),"cross-monitor drag with a moved and resized external display");
   var wheel=new Step{Type="滑鼠滾輪",Value="往下",X=100,Y=50,Hold=250,WheelDelta=120};MainForm.ValidateStep(drag);MainForm.ValidateStep(wheel);
   var saved=Json.Copy(new Template{Steps=new List<Step>{drag,wheel}});MainForm.Validate(saved);Check(saved.Steps[0].EndX==200&&saved.Steps[1].WheelDelta==120,"JSON preserves action settings");
   var copy=MainForm.CopyStep(drag);copy.EndY=99;Check(drag.EndY==300,"copy is independent");

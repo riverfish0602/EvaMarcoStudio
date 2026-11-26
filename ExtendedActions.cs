@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
@@ -28,6 +28,7 @@ public static class ActionKinds {
 // Every run owns its held inputs. Cancellation and failures release all tracked inputs.
 public sealed class InputPlayback:IDisposable {
  readonly List<ushort> keys=new List<ushort>();readonly List<string> buttons=new List<string>();
+ readonly RecordedScreen[] screens=RecordedScreen.Current();
  readonly Action<int,int> move;readonly Action<ushort,bool> key;readonly Action<string,bool> mouse;readonly Action<int> wheel;readonly Func<int,CancellationToken,Task> wait;
  public InputPlayback():this(Native.Move,Native.Key,Native.Mouse,Native.Wheel,(ms,ct)=>Task.Delay(ms,ct)){}
  public InputPlayback(Action<int,int> m,Action<ushort,bool> k,Action<string,bool> b,Action<int> w,Func<int,CancellationToken,Task> pause){move=m;key=k;mouse=b;wheel=w;wait=pause;}
@@ -36,7 +37,8 @@ public sealed class InputPlayback:IDisposable {
  public async Task Perform(Step s,CancellationToken token){
   token.ThrowIfCancellationRequested();
   if(RecordedGesture.Has(s)){await PlayRecorded(s,token);return;}
-  if(ActionKinds.Position(s.Type))move(s.X,s.Y);
+  var start=new Point();
+  if(ActionKinds.Position(s.Type)){start=RecordedScreen.Resolve(s.Screens,s.X,s.Y,screens,true);move(start.X,start.Y);}
   switch(s.Type){
    case "滑鼠點擊":Button(s.Value,false);try{await wait(s.Hold,token);}finally{Button(s.Value,true);}break;
    case "鍵盤按壓":
@@ -44,13 +46,15 @@ public sealed class InputPlayback:IDisposable {
    case "滑鼠滾輪":
     wheel(s.Value=="往上"?s.WheelDelta:-s.WheelDelta);if(s.Hold>0)await wait(s.Hold,token);break;
    case "滑鼠拖曳":
-    Button("左鍵",false);try{int t=0;while(t<s.Hold){int pause=Math.Min(15,s.Hold-t);await wait(pause,token);t+=pause;double fraction=(double)t/s.Hold;move((int)Math.Round(s.X+(s.EndX-s.X)*fraction),(int)Math.Round(s.Y+(s.EndY-s.Y)*fraction));}token.ThrowIfCancellationRequested();move(s.EndX,s.EndY);}finally{Button("左鍵",true);}break;
+    var end=RecordedScreen.Resolve(s.Screens,s.EndX,s.EndY,screens,true);
+    Button("左鍵",false);try{int t=0;while(t<s.Hold){int pause=Math.Min(15,s.Hold-t);await wait(pause,token);t+=pause;double fraction=(double)t/s.Hold;move((int)Math.Round(start.X+(end.X-start.X)*fraction),(int)Math.Round(start.Y+(end.Y-start.Y)*fraction));}token.ThrowIfCancellationRequested();move(end.X,end.Y);}finally{Button("左鍵",true);}break;
   }
  }
  async Task PlayRecorded(Step s,CancellationToken token){
   int original=s.RecordedInputs[s.RecordedInputs.Count-1].At,elapsed=0;
   try{foreach(var e in s.RecordedInputs){int at=original==0?0:(int)((long)e.At*s.Hold/original);if(at>elapsed)await wait(at-elapsed,token);elapsed=at;token.ThrowIfCancellationRequested();
-    switch(e.Kind){case "KeyDown":Key((ushort)e.Code,false);break;case "KeyUp":Key((ushort)e.Code,true);break;case "MouseDown":move(e.X,e.Y);Button(e.Button,false);break;case "MouseUp":move(e.X,e.Y);Button(e.Button,true);break;case "Move":move(e.X,e.Y);break;case "Wheel":move(e.X,e.Y);wheel(e.Delta);break;}
+    Point p=e.Kind=="KeyDown"||e.Kind=="KeyUp"?Point.Empty:RecordedScreen.Resolve(s.Screens,e.X,e.Y,screens,true);
+    switch(e.Kind){case "KeyDown":Key((ushort)e.Code,false);break;case "KeyUp":Key((ushort)e.Code,true);break;case "MouseDown":move(p.X,p.Y);Button(e.Button,false);break;case "MouseUp":move(p.X,p.Y);Button(e.Button,true);break;case "Move":move(p.X,p.Y);break;case "Wheel":move(p.X,p.Y);wheel(e.Delta);break;}
    }if(s.Hold>elapsed)await wait(s.Hold-elapsed,token);
   }finally{Dispose();}
  }
